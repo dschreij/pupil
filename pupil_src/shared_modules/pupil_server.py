@@ -16,9 +16,8 @@ from ctypes import c_float,c_int,create_string_buffer
 import cv2
 import zmq
 from plugin import Plugin
-
-
-
+import time
+import json
 
 import logging
 logger = logging.getLogger(__name__)
@@ -53,20 +52,57 @@ class Pupil_Server(Plugin):
         except zmq.ZMQError:
             logger.error("Could not set Socket.")
 
-    def update(self,frame,recent_pupil_positions,events):
-        for p in recent_pupil_positions:
-            msg = "Pupil\n"
-            for key,value in p.iteritems():
-                if key not in self.exclude_list:
-                    msg +=key+":"+str(value)+'\n'
-            self.socket.send( msg )
+    def update(self,frame,recent_pupil_positions,events):   
+        t_interval = .05    # in seconds
 
-        for e in events:
+        ## Determine if new frame should be sent to client
+        try:
+            curr_time = time.time()
+            send_image = curr_time - self.last_frame_sent > t_interval            
+            if send_image:
+                self.last_frame_sent = curr_time
+        except:
+            # if no last_frame_sent var exists an exception is raised. Initialize everything
+            self.last_frame_sent = curr_time
+            send_image = True
+					
+        # Check if pupil data should be sent
+        if len(recent_pupil_positions):
+            msg = "Pupil\n"    
+            for p in recent_pupil_positions:                
+                for key,value in p.iteritems():
+                    if key not in self.exclude_list:
+                        msg +=key+":"+str(value)+'\n'
+            self.socket.send( msg, zmq.SNDMORE )
+        else:
+            self.socket.send( "None", zmq.SNDMORE )
+
+        # Check if event data should be sent
+        if len(events):
             msg = 'Event'+'\n'
-            for key,value in e.iteritems():
-                if key not in self.exclude_list:
-                    msg +=key+":"+str(value).replace('\n','')+'\n'
-            self.socket.send( msg )
+            for e in events:                
+                for key,value in e.iteritems():
+                    if key not in self.exclude_list:
+                        msg +=key+":"+str(value).replace('\n','')+'\n'
+            self.socket.send( msg, zmq.SNDMORE )
+        else:
+            self.socket.send( "None", zmq.SNDMORE )								
+
+        # Send image data, if applicable
+        # ZMQ allows to send a numpy array directly over a socket
+        # You do need to send metadata about the image to the client, so it can 
+        # reconstruct it there
+        if send_image:
+            metadata = dict(
+                dtype=str(frame.img.dtype),
+                shape=frame.img.shape
+            )
+            self.socket.send_json(metadata, zmq.SNDMORE)
+            self.socket.send(frame.img, zmq.SNDMORE, copy=True, track=False)
+        else:
+            self.socket.send( "None", zmq.SNDMORE )
+            self.socket.send( "None" )
+
 
     def close(self):
         self.alive = False

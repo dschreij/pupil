@@ -106,7 +106,7 @@ def main():
     # world_src = "/Users/mkassner/Desktop/2014_01_21/000/world.avi"
 
     # Camera video size in pixels (width,height)
-    eye_size = (640,360)
+    eye_size = (480,360)
     world_size = (1280,720)
 
 

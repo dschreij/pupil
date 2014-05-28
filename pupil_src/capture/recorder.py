@@ -31,7 +31,12 @@ class Recorder(Plugin):
         self.record_eye = record_eye
         self.frame_count = 0
         self.timestamps = []
+        
+        # Main gaze positions
         self.gaze_list = []
+        # Gaze positions relative to surface
+        self.surfaces_gaze_list = []
+        
         self.eye_tx = eye_tx
         self.start_time = time()
 
@@ -91,13 +96,22 @@ class Recorder(Plugin):
         return strftime("%H:%M:%S", rec_time)
 
     def update(self,frame,recent_pupil_positons,events):
-        self.frame_count += 1
+        # cv2.putText(frame.img, "Frame %s"%self.frame_count,(200,200), cv2.FONT_HERSHEY_SIMPLEX,1,(255,100,100))
         for p in recent_pupil_positons:
             if p['norm_pupil'] is not None:
                 gaze_pt = p['norm_gaze'][0],p['norm_gaze'][1],p['norm_pupil'][0],p['norm_pupil'][1],p['timestamp'],p['confidence']
                 self.gaze_list.append(gaze_pt)
+            # Check if eye positions have fallen within a surface. If so, log them to the surface datafile 
+            for key, value in p.iteritems():
+                if "realtime gaze on" in key:
+                    surface_name = key.split("realtime gaze on ")[1]
+                    self.surfaces_gaze_list.append([surface_name, value[0], value[1], p['timestamp']])
+
+
         self.timestamps.append(frame.timestamp)
         self.writer.write(frame.img)
+        self.frame_count += 1
+
 
     def stop_and_destruct(self):
         #explicit release of VideoWriter
@@ -109,32 +123,30 @@ class Recorder(Plugin):
                 self.eye_tx.send(None)
             except:
                 logger.warning("Could not stop eye-recording. Please report this bug!")
+                
         gaze_list_path = os.path.join(self.rec_path, "gaze_positions.npy")
         np.save(gaze_list_path,np.asarray(self.gaze_list))
 
         timestamps_path = os.path.join(self.rec_path, "timestamps.npy")
         np.save(timestamps_path,np.array(self.timestamps))
 
+        if len(self.surfaces_gaze_list) > 0:
+            surface_gaze_list_path = os.path.join(self.rec_path, "surface_gaze_positions.npy")
+            np.save(surface_gaze_list_path,np.asarray(self.surfaces_gaze_list))
+
         try:
-            surface_definitions_file = glob(os.path.join(self.g_pool.user_dir,"surface_definitions*"))[0].rsplit(os.path.sep,1)[-1]
-            copy2(os.path.join(self.g_pool.user_dir,surface_definitions_file),os.path.join(self.rec_path,surface_definitions_file))
+            copy2(os.path.join(self.g_pool.user_dir,"surface_definitions"),os.path.join(self.rec_path,"surface_definitions"))
         except:
             logger.info("No surface_definitions data found. You may want this if you do marker tracking.")
 
         try:
-            cal_pt_cloud = np.load(os.path.join(self.g_pool.user_dir,"cal_pt_cloud.npy"))
-            cal_pt_cloud_path = os.path.join(self.rec_path, "cal_pt_cloud.npy")
-            np.save(cal_pt_cloud_path, cal_pt_cloud)
+            copy2(os.path.join(self.g_pool.user_dir,"cal_pt_cloud.npy"),os.path.join(self.rec_path,"cal_pt_cloud.npy"))
         except:
             logger.warning("No calibration data found. Please calibrate first.")
 
         try:
-            camera_matrix = np.load(os.path.join(self.g_pool.user_dir,"camera_matrix.npy"))
-            dist_coefs = np.load(os.path.join(self.g_pool.user_dir,"dist_coefs.npy"))
-            cam_path = os.path.join(self.rec_path, "camera_matrix.npy")
-            dist_path = os.path.join(self.rec_path, "dist_coefs.npy")
-            np.save(cam_path, camera_matrix)
-            np.save(dist_path, dist_coefs)
+            copy2(os.path.join(self.g_pool.user_dir,"camera_matrix.npy"),os.path.join(self.rec_path,"camera_matrix.npy"))
+            copy2(os.path.join(self.g_pool.user_dir,"dist_coefs.npy"),os.path.join(self.rec_path,"dist_coefs.npy"))
         except:
             logger.info("No camera intrinsics found.")
 
